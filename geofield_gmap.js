@@ -47,10 +47,10 @@ function geofield_gmap_field_widget_form(form, form_state, field, instance, lang
     });
     
     // Hide the lat and lon inputs.
-    items[delta].children[2].type = 'hidden';
+    /*items[delta].children[2].type = 'hidden';
     items[delta].children[2].title = '';
     items[delta].children[3].type = 'hidden';
-    items[delta].children[3].title = '';
+    items[delta].children[3].title = '';*/
 
   }
   catch (error) { console.log('geofield_gmap_field_widget_form - ' + error); }
@@ -91,117 +91,100 @@ function theme_geofield_gmap_widget_pageshow(options) {
     if (typeof _geofield_gmap_maps[options.field_name][options.delta] === 'undefined') {
       _geofield_gmap_maps[options.field_name][options.delta] = {};
     }
+    
+    // Success callback.
+    var success = function(position) {
 
-    navigator.geolocation.getCurrentPosition(
-      
-      // Success.
-      function(position) {
+      // Set aside the user's position.
+      _my_module_user_latitude = position.coords.latitude;
+      _my_module_user_longitude = position.coords.longitude;
 
-        // Set aside the user's position.
-        _my_module_user_latitude = position.coords.latitude;
-        _my_module_user_longitude = position.coords.longitude;
-        
-        // Build the lat lng object from the user's current position.
-        var myLatlng = new google.maps.LatLng(
-          _my_module_user_latitude,
-          _my_module_user_longitude
-        );
-        
-        
-        
-        
-    // Build the map's options.
-    var mapOptions = {
-      center: myLatlng,
-      zoom: 11,
-      mapTypeControl: true,
-      mapTypeControlOptions: {
-        style: google.maps.MapTypeControlStyle.DROPDOWN_MENU
-      },
-      zoomControl: true,
-      zoomControlOptions: {
-        style: google.maps.ZoomControlStyle.SMALL
-      }
+      // Build the lat lng object from the user's current position.
+      var myLatlng = new google.maps.LatLng(
+        _my_module_user_latitude,
+        _my_module_user_longitude
+      );
+
+      // Build the map's options.
+      var mapOptions = {
+        center: myLatlng,
+        zoom: 11,
+        mapTypeControl: true,
+        mapTypeControlOptions: {
+          style: google.maps.MapTypeControlStyle.DROPDOWN_MENU
+        },
+        zoomControl: true,
+        zoomControlOptions: {
+          style: google.maps.ZoomControlStyle.SMALL
+        }
+      };
+
+      // Initialize the map, and stick it in the global collection.
+      var map = new google.maps.Map(
+        document.getElementById(options.id),
+        mapOptions
+      );
+      _geofield_gmap_maps[options.field_name][options.delta].map = map;
+
+      // Set a timeout to operate on the map...
+      setTimeout(function() {
+
+          // Resize the map to prevent grayed out areas, and reset the center.
+          google.maps.event.trigger(map, 'resize');
+          map.setCenter(myLatlng);
+  
+          // Add a draggable marker for position.
+          var marker = new google.maps.Marker({
+              draggable: true,
+              position: myLatlng,
+              map: map,
+              icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+          });
+          _geofield_gmap_maps[options.field_name][options.delta].marker = marker;
+
+          // When the marker has been dragged, place the lat/lon values in their
+          // input elements.
+          google.maps.event.addListener(marker, 'dragend', function() {
+
+              var pos = marker.getPosition();
+              $('#' + options.item_id + '-lat').val(pos.k);
+              $('#' + options.item_id + '-lon').val(pos.D).change();
+
+          });
+
+      }, 500);
+
     };
     
-    // Initialize the map, and stick it in the global collection.
-    var map = new google.maps.Map(
-      document.getElementById(options.id),
-      mapOptions
-    );
-    _geofield_gmap_maps[options.field_name][options.delta].map = map;
-
-    // Set a timeout to operate on the map...
-    setTimeout(function() {
-
-        // Resize the map to prevent grayed out areas, and reset the center.
-        google.maps.event.trigger(map, 'resize');
-        map.setCenter(myLatlng);
-
-        // Add a draggable marker for position.
-        var marker = new google.maps.Marker({
-            draggable: true,
-            position: myLatlng,
-            map: map,
-            icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
-        });
-        _geofield_gmap_maps[options.field_name][options.delta].marker = marker;
-
-        // When the marker has been dragged, place the lat/lon values in their
-        // input elements.
-        google.maps.event.addListener(marker, 'dragend', function() {
-
-            var pos = marker.getPosition();
-            $('#' + options.item_id + '-lat').val(pos.k);
-            $('#' + options.item_id + '-lon').val(pos.D).change();
-
-        });
-
-    }, 500);
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    },
-      
-            // Error
-      function(error) {
+    // Error callback.
+    var error = function(error) {
         
-        // Provide debug information to developer and user.
-        console.log(error);
-        drupalgap_alert(error.message);
-        
-        // Process error code.
-        switch (error.code) {
-
-          // PERMISSION_DENIED
-          case 1:
-            break;
-
-          // POSITION_UNAVAILABLE
-          case 2:
-            break;
-
-          // TIMEOUT
-          case 3:
-            break;
-
-        }
-
-      },
+      // Provide debug information to developer and user.
+      console.log(error);
+      drupalgap_alert(error.message);
       
-      // Options
-      { enableHighAccuracy: true }
-      
-    );
-    
-    
-    
+      // Process error code.
+      switch (error.code) {
+
+        // PERMISSION_DENIED
+        case 1:
+          break;
+
+        // POSITION_UNAVAILABLE
+        case 2:
+          break;
+
+        // TIMEOUT
+        case 3:
+          break;
+
+      }
+
+    };
+
+    // Get the current position.
+    navigator.geolocation.getCurrentPosition(success, error, { enableHighAccuracy: true });
+
   }
   catch (error) { console.log('theme_geofield_gmap_widget_pageshow - ' + error); }
 }
