@@ -20,8 +20,6 @@ function geofield_gmap_field_widget_form(form, form_state, field, instance, lang
     // We'll inherit the default geofield widget for starters.
     geofield_field_widget_form(form, form_state, field, instance, langcode, items, delta, element);
     
-    console.log(items[delta].children);
-    
     // Replace the 'Get current position' button provided by geofield.
     items[delta].children.splice(0, 1);
     items[delta].children.unshift({
@@ -34,8 +32,9 @@ function geofield_gmap_field_widget_form(form, form_state, field, instance, lang
       }
     });
     
-    // Prepend a geofield map widget onto the item's children.
-    items[delta].children.unshift({
+    // Prepend a geofield map widget onto the item's children. If we have an
+    // existing value, pass it along as well.
+    var map = {
       theme: 'geofield_gmap_widget',
       attributes: {
         id: field.field_name + '-gmap-widget-' + delta,
@@ -43,14 +42,21 @@ function geofield_gmap_field_widget_form(form, form_state, field, instance, lang
       },
       delta: delta,
       item_id: items[delta].id,
-      field_name: field.field_name
-    });
+      field_name: field.field_name,
+      lat: null,
+      lon: null
+    };
+    if (items[delta].item) {
+      map.lat = items[delta].item.lat;
+      map.lon = items[delta].item.lon;
+    }
+    items[delta].children.unshift(map);
     
     // Hide the lat and lon inputs.
-    /*items[delta].children[2].type = 'hidden';
+    items[delta].children[2].type = 'hidden';
     items[delta].children[2].title = '';
     items[delta].children[3].type = 'hidden';
-    items[delta].children[3].title = '';*/
+    items[delta].children[3].title = '';
 
   }
   catch (error) { console.log('geofield_gmap_field_widget_form - ' + error); }
@@ -61,7 +67,6 @@ function geofield_gmap_field_widget_form(form, form_state, field, instance, lang
  */
 function theme_geofield_gmap_widget(variables) {
   try {
-    console.log(variables);
     return '<div ' + drupalgap_attributes(variables.attributes) + '></div>' +
       drupalgap_jqm_page_event_script_code({
           page_id: drupalgap_get_page_id(),
@@ -71,7 +76,9 @@ function theme_geofield_gmap_widget(variables) {
               id: variables.attributes.id,
               item_id: variables.item_id,
               field_name: variables.field_name,
-              delta: variables.delta
+              delta: variables.delta,
+              lat: variables.lat,
+              lon: variables.lon
           })
       }, variables.delta);
   }
@@ -95,19 +102,15 @@ function theme_geofield_gmap_widget_pageshow(options) {
     // Success callback.
     var success = function(position) {
 
-      // Set aside the user's position.
-      _my_module_user_latitude = position.coords.latitude;
-      _my_module_user_longitude = position.coords.longitude;
-
       // Build the lat lng object from the user's current position.
-      var myLatlng = new google.maps.LatLng(
-        _my_module_user_latitude,
-        _my_module_user_longitude
+      var latlng = new google.maps.LatLng(
+        position.coords.latitude,
+        position.coords.longitude
       );
 
       // Build the map's options.
       var mapOptions = {
-        center: myLatlng,
+        center: latlng,
         zoom: 11,
         mapTypeControl: true,
         mapTypeControlOptions: {
@@ -131,16 +134,18 @@ function theme_geofield_gmap_widget_pageshow(options) {
 
           // Resize the map to prevent grayed out areas, and reset the center.
           google.maps.event.trigger(map, 'resize');
-          map.setCenter(myLatlng);
+          map.setCenter(latlng);
   
-          // Add a draggable marker for position.
+          // Add a draggable marker for position and set the hidden input's val.
           var marker = new google.maps.Marker({
               draggable: true,
-              position: myLatlng,
+              position: latlng,
               map: map,
               icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
           });
           _geofield_gmap_maps[options.field_name][options.delta].marker = marker;
+          $('#' + options.item_id + '-lat').val(position.coords.latitude);
+          $('#' + options.item_id + '-lon').val(position.coords.longitude).change();
 
           // When the marker has been dragged, place the lat/lon values in their
           // input elements.
@@ -182,8 +187,14 @@ function theme_geofield_gmap_widget_pageshow(options) {
 
     };
 
-    // Get the current position.
-    navigator.geolocation.getCurrentPosition(success, error, { enableHighAccuracy: true });
+    // If we have an existing value just use that as the center point,
+    // otherwise lookup the user's current position.
+    if (options.lat && options.lon) {
+      success({ coords: { latitude: options.lat, longitude: options.lon } });
+    }
+    else {
+      navigator.geolocation.getCurrentPosition(success, error, { enableHighAccuracy: true });
+    }
 
   }
   catch (error) { console.log('theme_geofield_gmap_widget_pageshow - ' + error); }
@@ -194,10 +205,11 @@ function theme_geofield_gmap_widget_pageshow(options) {
  */
 function _geofield_gmap_field_widget_form_click(field_name, delta, item_id) {
   try {
+    // Grab their current position then place the coordinate values into the
+    // text fields, then force a change event to fire, and then move the marker
+    // on the map and re center it.
     navigator.geolocation.getCurrentPosition(
       function(position) {
-        // Place the coordinate values into the text fields, then force a change
-        // event to fire, and then move the marker on the map and re center it.
         $('#' + item_id + '-lat').val(position.coords.latitude);
         $('#' + item_id + '-lon').val(position.coords.longitude).change();
         var latLng = new google.maps.LatLng(
