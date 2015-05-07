@@ -16,10 +16,16 @@ function geofield_gmap_install() {
  */
 function geofield_gmap_field_widget_form(form, form_state, field, instance, langcode, items, delta, element) {
   try {
-    
+
     // We'll inherit the default geofield widget for starters.
     geofield_field_widget_form(form, form_state, field, instance, langcode, items, delta, element);
     
+    // There's a spelling error bug with the satellite map, correct it.
+    // @see https://www.drupal.org/node/2484881
+    if (instance.widget.settings.map_type == 'SATELITE') {
+      instance.widget.settings.map_type = 'SATELLITE';
+    }
+
     // Replace the 'Get current position' button provided by geofield.
     items[delta].children.splice(0, 1);
     items[delta].children.unshift({
@@ -31,9 +37,10 @@ function geofield_gmap_field_widget_form(form, form_state, field, instance, lang
         }
       }
     });
-    
+
     // Prepend a geofield map widget onto the item's children. If we have an
-    // existing value, pass it along as well.
+    // existing value, pass it along as well. Also check for a default value if
+    // there is no existing value.
     var map = {
       theme: 'geofield_gmap_widget',
       attributes: {
@@ -44,14 +51,25 @@ function geofield_gmap_field_widget_form(form, form_state, field, instance, lang
       item_id: items[delta].id,
       field_name: field.field_name,
       lat: null,
-      lon: null
+      lon: null,
+      settings: instance.widget.settings
     };
+    // Item value.
     if (items[delta].item) {
       map.lat = items[delta].item.lat;
       map.lon = items[delta].item.lon;
     }
+    // Default value.
+    else if (
+      instance.default_value &&
+      instance.default_value[delta] &&
+      instance.default_value[delta].geom
+    ) {
+      map.lat = instance.default_value[delta].geom.lat;
+      map.lon = instance.default_value[delta].geom.lon;
+    }
     items[delta].children.unshift(map);
-    
+
     // Hide the lat and lon inputs.
     items[delta].children[2].type = 'hidden';
     items[delta].children[2].title = '';
@@ -67,19 +85,21 @@ function geofield_gmap_field_widget_form(form, form_state, field, instance, lang
  */
 function theme_geofield_gmap_widget(variables) {
   try {
+    var options = {
+        id: variables.attributes.id,
+        item_id: variables.item_id,
+        field_name: variables.field_name,
+        delta: variables.delta,
+        lat: variables.lat,
+        lon: variables.lon,
+        settings: variables.settings
+    };
     return '<div ' + drupalgap_attributes(variables.attributes) + '></div>' +
       drupalgap_jqm_page_event_script_code({
           page_id: drupalgap_get_page_id(),
           jqm_page_event: 'pageshow',
           jqm_page_event_callback: 'theme_geofield_gmap_widget_pageshow',
-          jqm_page_event_args: JSON.stringify({
-              id: variables.attributes.id,
-              item_id: variables.item_id,
-              field_name: variables.field_name,
-              delta: variables.delta,
-              lat: variables.lat,
-              lon: variables.lon
-          })
+          jqm_page_event_args: JSON.stringify(options)
       }, variables.delta);
   }
   catch (error) { console.log('theme_geofield_gmap_widget - ' + error); }
@@ -90,7 +110,7 @@ function theme_geofield_gmap_widget(variables) {
  */
 function theme_geofield_gmap_widget_pageshow(options) {
   try {
-    
+
     // Prepare the global maps collection for this item.
     if (typeof _geofield_gmap_maps[options.field_name] === 'undefined') {
       _geofield_gmap_maps[options.field_name] = {};
@@ -98,20 +118,28 @@ function theme_geofield_gmap_widget_pageshow(options) {
     if (typeof _geofield_gmap_maps[options.field_name][options.delta] === 'undefined') {
       _geofield_gmap_maps[options.field_name][options.delta] = {};
     }
-    
+
     // Success callback.
     var success = function(position) {
 
-      // Build the lat lng object from the user's current position.
+      // Build the lat lng object from the position.
       var latlng = new google.maps.LatLng(
         position.coords.latitude,
         position.coords.longitude
       );
 
+      // Figure out the zoom level.
+      var zoom = 11;
+      if (
+        options.settings.default_map_settings &&
+        !empty(options.settings.default_map_settings.zoom_level)
+      ) { zoom = parseInt(options.settings.default_map_settings.zoom_level); }
+
       // Build the map's options.
       var mapOptions = {
+        zoom: zoom,
         center: latlng,
-        zoom: 11,
+        mapTypeId: google.maps.MapTypeId[options.settings.map_type],
         mapTypeControl: true,
         mapTypeControlOptions: {
           style: google.maps.MapTypeControlStyle.DROPDOWN_MENU
@@ -150,24 +178,33 @@ function theme_geofield_gmap_widget_pageshow(options) {
           // When the marker has been dragged, place the lat/lon values in their
           // input elements.
           google.maps.event.addListener(marker, 'dragend', function() {
-
               var pos = marker.getPosition();
-              $('#' + options.item_id + '-lat').val(pos.k);
-              $('#' + options.item_id + '-lon').val(pos.D).change();
-
+              $('#' + options.item_id + '-lat').val(pos.lat());
+              $('#' + options.item_id + '-lon').val(pos.lng()).change();
           });
+
+          // If they are allowed to click on the map to set the position, set up
+          // the click listener.
+          if (options.settings.click_to_place_marker) {
+            google.maps.event.addListener(map, 'click', function(event) {
+                var pos = event.latLng;
+                marker.setPosition(pos);
+                $('#' + options.item_id + '-lat').val(pos.lat());
+                $('#' + options.item_id + '-lon').val(pos.lng()).change();
+            });
+          }
 
       }, 500);
 
     };
-    
+
     // Error callback.
     var error = function(error) {
-        
+
       // Provide debug information to developer and user.
       console.log(error);
       drupalgap_alert(error.message);
-      
+
       // Process error code.
       switch (error.code) {
 
@@ -187,14 +224,17 @@ function theme_geofield_gmap_widget_pageshow(options) {
 
     };
 
-    // If we have an existing value just use that as the center point,
-    // otherwise lookup the user's current position.
+    // If we were provided a lat/lon (from a value or default value), just use
+    // that as the center point. If html5 geolocation is turned on
+    // for the widget lookup the user's current position, otherwise use the
+    // center of the earth.
     if (options.lat && options.lon) {
       success({ coords: { latitude: options.lat, longitude: options.lon } });
     }
-    else {
+    else if (options.settings.html5_geolocation) {
       navigator.geolocation.getCurrentPosition(success, error, { enableHighAccuracy: true });
     }
+    else { success({ coords: { latitude: '0.000000', longitude: '0.000000' } }); }
 
   }
   catch (error) { console.log('theme_geofield_gmap_widget_pageshow - ' + error); }
