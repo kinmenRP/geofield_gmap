@@ -272,6 +272,6 @@ function _geofield_gmap_field_widget_form_click(field_name, delta, item_id) {
  * Implements hook_locale().
  */
 function geofield_gmap_locale() {
-  // Tell DrupalGap we have custom Spanish and Italian translations to load.
+  // Tell DrupalGap we have custom translations to load.
   return ['de', 'it', 'zh_hant', 'zh_hans'];
 }
